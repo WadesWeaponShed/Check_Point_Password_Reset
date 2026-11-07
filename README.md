@@ -6,26 +6,145 @@ All device access goes through the connected **SMS, CMA, or Smart-1 Cloud Manage
 
 Created using [Check Point API Framework](https://github.com/WadesWeaponShed/Check-Point-API-Framework).
 
-## Requirements and startup
+## Install and run
 
-- Node.js 18 or later.
-- OpenSSL on the app server's PATH with support for `openssl passwd -6` to generate hashes. An existing compatible hash can also be pasted.
-- Management API access and permissions to list gateway/server objects, test SIC, execute scripts, and read task results.
-- Supported Gaia targets reachable by the manager. Validate compatibility in your environment before bulk changes, especially for scalable platforms.
+Install this app on an administrator workstation or a trusted administration host, rather than on a Gaia appliance. The browser connects to the app; the app host needs HTTPS connectivity to the manager, and the manager needs working SIC / run-script connectivity to the targets.
 
-There are no third-party npm dependencies.
+The operator needs Management API permissions to list gateway/server objects, test SIC, execute scripts, and read task results. Validate target compatibility in your environment before bulk changes, especially on scalable platforms.
+
+### 1. Install prerequisites
+
+| Dependency | Download / installation | Required for |
+| --- | --- | --- |
+| Node.js and npm | Install a currently supported **LTS** release from [Node.js downloads](https://nodejs.org/en/download/). npm is included in the installer. The code requires Node.js 18 or newer, but use a supported LTS for a new installation. | Running the app |
+| OpenSSL | Install an OpenSSL executable with `passwd -6` support using the instructions below. | Built-in password hash generation; pasted compatible hashes do not need OpenSSL |
+| Git | [Download Git](https://git-scm.com/downloads), or use the ZIP option below. | Cloning and updating; optional for ZIP installs |
+
+**macOS:** If you use [Homebrew](https://brew.sh/), install [OpenSSL 3](https://formulae.brew.sh/formula/openssl@3) and put it first on the current shell's PATH:
 
 ```sh
+brew install openssl@3
+export PATH="$(brew --prefix openssl@3)/bin:$PATH"
+```
+
+The macOS-provided executable may not support `passwd -6`. Start the app from the same shell after setting PATH. For a service or a new terminal, configure that environment's PATH separately.
+
+**Debian / Ubuntu Linux:** Install OpenSSL using the distribution package manager:
+
+```sh
+sudo apt-get update
+sudo apt-get install openssl
+```
+
+Install Node.js LTS separately using the Node.js download instructions; distribution repositories may offer an older version. Other Linux distributions should use their own package manager for OpenSSL.
+
+**Windows:** Install Node.js LTS, then select an OpenSSL installer appropriate to your machine from the [OpenSSL project's binary installation page](https://github.com/openssl/openssl/wiki/Binaries). Ensure the directory containing `openssl.exe` is on PATH. Reopen PowerShell after changing PATH. Installing Git alone does not guarantee that OpenSSL is available to the Node process.
+
+Verify prerequisites in the terminal you will use to start the app:
+
+```sh
+node --version
+npm --version
+openssl version
+openssl passwd -6
+```
+
+The final command prompts for a test password and should produce a value starting with `$6$`. Use a disposable test value. If `-6` is unsupported or the executable is missing, fix OpenSSL / PATH before using the generator.
+
+### 2. Download the app
+
+**With Git** (macOS, Linux, or PowerShell):
+
+```sh
+git clone https://github.com/WadesWeaponShed/Check_Point_Password_Reset.git
+cd Check_Point_Password_Reset
+```
+
+**Without Git:** [Download the main branch ZIP](https://github.com/WadesWeaponShed/Check_Point_Password_Reset/archive/refs/heads/main.zip), extract it, and open a terminal in the extracted `Check_Point_Password_Reset-main` directory. The working directory must contain `package.json`, `src`, and `public`.
+
+There are **no third-party npm dependencies**, no database, and no build step. `npm install` is not required. The bundled API catalogs allow startup without an internet connection once prerequisites and source files are installed.
+
+### 3. Check and start
+
+From the app directory:
+
+```sh
+npm run check
 npm start
 ```
 
-Open **http://127.0.0.1:3000**. To use another port:
+`npm run check` checks JavaScript syntax; it does not validate live Check Point connectivity. Keep the start terminal open. Open **http://127.0.0.1:3000** in a browser on the same host. Stop the process with **Ctrl+C** when no reset is running.
+
+To use port 3008 on macOS / Linux:
 
 ```sh
 PORT=3008 npm start
 ```
 
-`npm run check` checks JavaScript syntax. Development tests, previews, and design documentation are not included in this runtime repository.
+In Windows PowerShell:
+
+```powershell
+$env:PORT = "3008"
+npm start
+```
+
+### 4. Verify the deployment
+
+In a second terminal, check the default port (replace `3000` if configured differently):
+
+```sh
+curl --fail http://127.0.0.1:3000/api/health
+```
+
+In Windows PowerShell:
+
+```powershell
+Invoke-RestMethod http://127.0.0.1:3000/api/health
+```
+
+Expect `ok: true`, a request ID, and a server timestamp. Load the browser UI and use its password generator with matching disposable values to verify OpenSSL integration. A generated hash should start with `$6$`. These checks require no manager credentials and do not change any device.
+
+An operator can then log in to a manager and verify that inventory, automatic SIC checks, and platform detection complete. Device password resets are a separate, explicitly confirmed operator action; do not use them as a deployment smoke test.
+
+### Runtime configuration
+
+Set environment variables in the launching shell or service configuration. **The app does not automatically load `.env` files.**
+
+| Variable | Default | Purpose |
+| --- | --- | --- |
+| `HOST` | `127.0.0.1` | Listening address; retain localhost for local use |
+| `PORT` | `3000` | HTTP port |
+| `RUN_SCRIPT_CONCURRENCY` | `8` | Concurrent device operations |
+| `LARGE_ENV_RUN_SCRIPT_CONCURRENCY` | `3` | Device concurrency in Large Environment Mode |
+| `LARGE_ENV_API_CONCURRENCY` | `10` | API concurrency in Large Environment Mode |
+| `TASK_POLL_ATTEMPTS` | `180` | Normal task polling budget |
+| `TASK_POLL_INTERVAL_MS` | `1000` | Normal initial polling interval in milliseconds |
+| `LARGE_ENV_TASK_POLL_INTERVAL_MS` | `1250` | Large Environment Mode polling interval |
+| `CP_API_LOGGING` | Unset | Any nonempty value enables redacted API request logs; leave unset to disable |
+| `CATALOG_AUTO_UPDATE` | Unset | Set exactly `true` to enable catalog refresh at startup; requires internet access |
+
+No manager credentials belong in deployment files. Enter them in the UI after startup. The app is intended for a trusted local operator; remote access requires an authenticated HTTPS access layer. See **Operation and data handling** before changing the listening address.
+
+### Deployment-agent checklist
+
+1. Choose a writable installation directory on the administration host. Install supported Node.js LTS and, for generation, an OpenSSL executable supporting `passwd -6`.
+2. Clone or extract this repository. Preserve the directory layout; do not serve `public` alone or run only a static web server.
+3. Set the working directory to the repository root. Set PATH, HOST, and PORT explicitly in the launch environment as needed. Keep the default localhost binding unless remote access has been deliberately configured.
+4. Run `npm run check`, then launch `npm start`. For unattended operation, use the host's service manager with the same working directory and environment, a non-root service account, and process restart / logging configured. Shell exports do not automatically carry into services.
+5. Verify `/api/health`, the browser UI, and disposable hash generation. Do not store real passwords in commands, logs, or deployment reports, and do not submit a reset during installation.
+6. Report the installed directory, source commit (when using Git), Node.js version, listening URL, start / stop method, and verification results. Hand manager login and target selection to the operator. Sessions and results are not durable across restarts.
+
+### Update an existing installation
+
+Wait for running work to finish and export any results you need, then stop the app. For a Git installation:
+
+```sh
+git pull --ff-only
+npm run check
+npm start
+```
+
+If Git reports local changes or a divergent branch, review them before updating. For a ZIP installation, extract a fresh copy and launch it using the same environment settings. Verify health and hash generation again after updating. An operator must log in again after restart.
 
 ## Using the app
 
