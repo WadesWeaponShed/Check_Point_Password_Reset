@@ -1,6 +1,6 @@
 # Framework Design System
 
-The approved interface is a compact operator workbench inspired by the Hardening App. This document is the visual reference for applications built on this framework.
+The approved interface is a compact operator workbench with a consistent toolbox design system. This document is the visual reference for applications built on this framework.
 
 ## Tokens
 | Role | Value |
@@ -47,7 +47,7 @@ Allow Self-Signed Certificate must default to checked for SMS, Smart-1 Cloud, an
 
 ## Password Changer workbench
 
-The password tool inherits the Hardening App's compact header, slate navigation, pink active selection, and 6px controls. The workspace is capped at 1440px with 24px desktop gutters. Its four navigation buttons display one workflow panel at a time, retaining all entered state; the active button uses aria-pressed and aria-current. Navigation becomes a two-column control group below 850px.
+The password tool uses a compact header, slate navigation, pink active selection, and 6px controls. The workspace is capped at 1440px with 24px desktop gutters. Its four navigation buttons display one workflow panel at a time, retaining all entered state; the active button uses aria-pressed and aria-current. Navigation becomes a two-column control group below 850px.
 
 SIC states use text badges: green for communicating, red for noncommunicating or test failure, neutral for pending or untested. Selected inventory rows use a restrained pink tint. API content stays text-only. The target table scrolls inside its own bounded container. Empty and filtered inventory states include explanatory text. Progress and errors appear above the workbench, near the connection context.
 

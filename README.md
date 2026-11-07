@@ -1,6 +1,6 @@
 # Check Point Password Changer
 
-A local Check Point toolbox app for resetting an existing Gaia user's password hash across selected gateways, physical cluster members, and Check Point servers. Built from `CP-API-Framework`, with the hardening app's workbench appearance, per-member SIC gating, and terminal-state task polling.
+A local Check Point toolbox app for resetting an existing Gaia user's password hash across selected gateways, physical cluster members, and Check Point servers. Built from `CP-API-Framework`, with a compact workbench, per-member SIC gating, and terminal-state task polling.
 
 ## Run
 
@@ -25,7 +25,7 @@ Open http://127.0.0.1:3000. Set `PORT` to use another port. Run `npm run check` 
 
 The management API account needs permission to list gateway objects, test SIC, run scripts, and read task results. The target must support Gaia SHA-512 crypt, Clish script execution, and account changes through Management API run-script. Validate the workflow on a lab gateway before bulk use. This tool does not support Spark/Gaia Embedded or all-domain MDS resets. Scalable Security Groups require the platform preflight described below.
 
-The framework SessionManager retains its SMS, Cloud URL normalization, optional MDS contexts, TLS defaults, and queues. This workflow deliberately uses the selected domain's `primary` context for its managed gateways. Large-environment mode reduces SIC/reset worker concurrency. `test-sic-status` has a 120-second request timeout. Scripts poll all returned tasks to terminal states using the hardening app's task-polling module. `TASK_POLL_ATTEMPTS` (default 180) and `TASK_POLL_INTERVAL_MS` (default 1000) determine the polling time budget; backoff is capped at 4 seconds. A timeout is **Unknown**, never success, and does not resubmit a script. Check the gateway before retrying: a password may have changed even if saving or verification failed.
+The framework SessionManager retains its SMS, Cloud URL normalization, optional MDS contexts, TLS defaults, and queues. This workflow deliberately uses the selected domain's `primary` context for its managed gateways. Large-environment mode reduces SIC/reset worker concurrency. `test-sic-status` has a 120-second request timeout. Scripts poll all returned tasks to terminal states using the task-polling module. `TASK_POLL_ATTEMPTS` (default 180) and `TASK_POLL_INTERVAL_MS` (default 1000) determine the polling time budget; backoff is capped at 4 seconds. A timeout is **Unknown**, never success, and does not resubmit a script. Check the gateway before retrying: a password may have changed even if saving or verification failed.
 
 Reset jobs and the last ten job records live only in server memory. Keep the app and browser open while a reset runs. Reloading the browser loses the opaque app session identifier; restarting the server loses all jobs and sessions. Concurrent reset jobs in the same session are blocked. Operations already submitted to Check Point may continue after the app stops.
 
@@ -36,7 +36,6 @@ Bind to localhost by default. The inherited generic API routes are intended for 
 ## Sources
 
 - Base: [Check Point API Framework](https://github.com/WadesWeaponShed/Check-Point-API-Framework)
-- Appearance, SIC test semantics, and task polling: Check Point Hardening App
 
 `tests/preview-server.mjs` serves an explicitly synthetic UI preview on port 3009. It never connects to Check Point and refuses password reset execution.
 
@@ -50,7 +49,7 @@ Source: [Check Point: Configuring System Passwords in Gaia Clish](https://sc1.ch
 
 ## Gaia configuration lock recovery
 
-For both Gaia user and Expert resets, a completed failed task with an explicit configuration-lock diagnostic triggers the Hardening App recovery pattern: submit `clish -c "lock database override"` through the connected manager, verify completion, wait 1.5 seconds, and retry the password command. A persistent lock permits two more override/retry cycles after 2.5 and 4 seconds. Each attempt stays associated with the selected target in collapsed diagnostics. This takes the configuration lock from another admin session; the review warning discloses that impact. Coordinate with other administrators before applying. Failed or unverified overrides stop recovery. Unknown completion, timeouts, and unrelated errors do not trigger overrides or retries. Recovery does not run until the operator confirms a reset.
+For both Gaia user and Expert resets, a completed failed task with an explicit configuration-lock diagnostic triggers configuration-lock recovery: submit `clish -c "lock database override"` through the connected manager, verify completion, wait 1.5 seconds, and retry the password command. A persistent lock permits two more override/retry cycles after 2.5 and 4 seconds. Each attempt stays associated with the selected target in collapsed diagnostics. This takes the configuration lock from another admin session; the review warning discloses that impact. Coordinate with other administrators before applying. Failed or unverified overrides stop recovery. Unknown completion, timeouts, and unrelated errors do not trigger overrides or retries. Recovery does not run until the operator confirms a reset.
 
 ## Scalable Security Groups / Maestro
 
