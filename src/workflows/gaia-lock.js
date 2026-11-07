@@ -1,4 +1,4 @@
-// Adapted from Hardening App runGaiaConfigCommandWithLockOverride.
+// Recover explicit Gaia configuration-lock failures through the manager.
 export function hasConfigLockError(response) {
   const text = [response.output, ...(response.taskSummary || []).flatMap(task => [task.statusDescription, ...(task.executions || []).map(execution => execution.message)])].join('\n');
   return /CLINFR0771|CLINFR0519|config(?:uration)? lock (?:is owned|present)|lock database override/i.test(text);
