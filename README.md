@@ -10,7 +10,7 @@ Requires Node.js 18+ and OpenSSL with `passwd -6` on PATH. No npm dependencies.
 npm start
 ```
 
-Open http://127.0.0.1:3000. Set `PORT` to use another port. Run `npm run check` for syntax checks and automated tests.
+Open http://127.0.0.1:3000. Set `PORT` to use another port. Run `npm run check` for JavaScript syntax checks.
 
 ## Workflow
 
@@ -31,13 +31,12 @@ Reset jobs and the last ten job records live only in server memory. Keep the app
 
 Passwords go to OpenSSL through stdin and are cleared from input fields after successful hashing. Credentials and Check Point SIDs remain server-side; browser storage is not used. Run-script bodies are redacted from optional API request logs. Generated hashes are sensitive and remain visible in the UI until cleared or submitted. Check Point itself receives the hash in the run-script payload and may retain task/audit records according to its configuration.
 
-Bind to localhost by default. The inherited generic API routes are intended for a trusted local operator, not a multi-user service. Add authentication and HTTPS before remote deployment. No live Check Point environment has been used for validation; the automated suite and synthetic preview do not prove release-specific Clish or Smart-1 Cloud execution compatibility.
+Bind to localhost by default. The inherited generic API routes are intended for a trusted local operator, not a multi-user service. Add authentication and HTTPS before remote deployment. No live Check Point environment has been used for validation; syntax checks do not prove release-specific Clish or Smart-1 Cloud execution compatibility.
 
 ## Sources
 
 - Base: [Check Point API Framework](https://github.com/WadesWeaponShed/Check-Point-API-Framework)
 
-`tests/preview-server.mjs` serves an explicitly synthetic UI preview on port 3009. It never connects to Check Point and refuses password reset execution.
 
 ## Expert mode password
 
@@ -45,7 +44,7 @@ Choose **Expert mode password** under **Password to change**. The username field
 
 The manager submits `clish -s -c "set expert-password-hash …"` via run-script. The same SIC gate, task polling, diagnostic redaction, save behavior, and unknown-completion handling apply. Keep a recovery session open and verify Expert access after the change. This does not change GRUB credentials or individual Gaia user passwords. Do not reuse the Expert password for GRUB.
 
-Source: [Check Point: Configuring System Passwords in Gaia Clish](https://sc1.checkpoint.com/documents/R81.20/WebAdminGuides/EN/CP_R81.20_Gaia_AdminGuide/Content/Topics-GAG/System-Passwords-Gaia-Clish.htm). Live Expert password execution has not been tested by the automated suite.
+Source: [Check Point: Configuring System Passwords in Gaia Clish](https://sc1.checkpoint.com/documents/R81.20/WebAdminGuides/EN/CP_R81.20_Gaia_AdminGuide/Content/Topics-GAG/System-Passwords-Gaia-Clish.htm). Live Expert password execution requires validation in your environment.
 
 ## Gaia configuration lock recovery
 
@@ -57,6 +56,6 @@ After a communicating SIC response, the app submits a read-only platform probe v
 
 Confirmed scalable groups use `gclish -s -c` for both Gaia user and Expert password hashes and `gclish -c "lock database override"` for lock recovery. Select the logical Security Group management object (SMO), once per group. A discovered Cluster member that resolves to a Security Group is blocked to avoid repeating a global reset through each member. The review identifies selected groups and warns that the command affects all members and sites. Member status evidence is expandable in inventory. The probe must report a positive, fully available `SGMs | N/N` count before execution; incomplete or unrecognized membership blocks the reset.
 
-Platform and availability are rechecked immediately before execution; a changed platform requires a new review. Group availability and member count are checked afterward. A degraded or unverifiable postflight yields Unknown, even when the global password command completed. This verifies global command completion and reported membership availability; it does not prove a new login works on each member. Verify access on every member. Both modes and lock recovery are tested with mocked manager responses and shell argument capture; live Maestro execution remains unverified.
+Platform and availability are rechecked immediately before execution; a changed platform requires a new review. Group availability and member count are checked afterward. A degraded or unverifiable postflight yields Unknown, even when the global password command completed. This verifies global command completion and reported membership availability; it does not prove a new login works on each member. Verify access on every member. Live Maestro execution remains unverified and requires lab validation.
 
 Sources: [Gaia Expert-mode shell syntax](https://sc1.checkpoint.com/documents/R82.10/WebAdminGuides/EN/CP_R82.10_Gaia_AdminGuide/Content/Topics-GAG/Gaia-Clish-Expert-Mode.htm), [Security Group status and membership](https://sc1.checkpoint.com/documents/R81.20/WebAdminGuides/EN/CP_R81.20_Maestro_AdminGuide/Content/Topics-Maestro-AG/Showing-Hardware-State-asg_stat.htm), [global command scope](https://sc1.checkpoint.com/documents/R81/WebAdminGuides/EN/CP_R81_Maestro_AdminGuide/Topics-Maestro-AG/Global-Commands.htm).

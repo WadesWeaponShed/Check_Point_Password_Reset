@@ -7,7 +7,7 @@
   "scripts": {
     "start": "node src/server.js",
     "dev": "node --watch src/server.js",
-    "check": "node --check src/server.js && node --check public/password-app.js && node --check public/result-view.js && node --check src/workflows/password-reset.js && node --test",
+    "check": "node --check src/server.js && node --check src/check-point-client.js && node --check src/session-manager.js && node --check src/task-polling.js && node --check src/catalog-manager.js && node --check src/workflows/password-hash.js && node --check src/workflows/password-reset.js && node --check src/workflows/platform.js && node --check src/workflows/gaia-lock.js && node --check public/password-app.js && node --check public/result-view.js && node --check public/target-selection.js && node --check public/password-hash-format.js",
     "catalog:update": "node scripts/generate-command-catalog.mjs",
     "catalog:sync": "node scripts/update-catalogs.mjs"
   },
