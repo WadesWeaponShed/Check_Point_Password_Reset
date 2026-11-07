@@ -1,0 +1,125 @@
+{
+  "title": "Gateway Update and Live Patch Commands",
+  "presets": [
+    {
+      "id": "cplp-list",
+      "name": "List Live Patches",
+      "script": "cplp list",
+      "risk": "safe",
+      "description": "Lists known Live Patches and their current status.",
+      "tags": ["CPLP", "Monitoring"]
+    },
+    {
+      "id": "maestro-cplp-list",
+      "name": "List Live Patches on All Maestro Members",
+      "script": "g_all cplp list",
+      "risk": "safe",
+      "description": "Runs cplp list on all Maestro or Scalable Platform Security Group members. Use only for Maestro or Scalable Platform targets.",
+      "tags": ["Maestro", "CPLP", "Monitoring"]
+    },
+    {
+      "id": "cplp-status-all",
+      "name": "Show Detailed Live Patch Status",
+      "script": "cplp status --all",
+      "risk": "safe",
+      "description": "Shows detailed Live Patch and process status.",
+      "tags": ["CPLP", "Monitoring"]
+    },
+    {
+      "id": "cpinfo-cpupdates",
+      "name": "Show Installed AutoUpdater Bundles",
+      "script": "cpinfo -y CPupdates",
+      "risk": "safe",
+      "description": "Displays installed AutoUpdater bundles and take numbers.",
+      "tags": ["AutoUpdater", "Monitoring"]
+    },
+    {
+      "id": "cpinfo-urgent",
+      "name": "Show Urgent Security Update Information",
+      "script": "cpinfo -y all | grep URGENT",
+      "risk": "safe",
+      "description": "Filters cpinfo output for Urgent Security Update information.",
+      "tags": ["AutoUpdater", "Monitoring"]
+    },
+    {
+      "id": "autoupdater-status",
+      "name": "Check AutoUpdater Status",
+      "script": "autoupdatercli status",
+      "risk": "safe",
+      "description": "Checks AutoUpdater connectivity, configured update interval, and last update check.",
+      "tags": ["AutoUpdater", "Monitoring"]
+    },
+    {
+      "id": "autoupdater-show-urgent",
+      "name": "Show Urgent Security Updates",
+      "script": "autoupdatercli show urgent_security_updates",
+      "risk": "safe",
+      "description": "Shows current and previous Urgent Security Update packages.",
+      "tags": ["AutoUpdater", "Monitoring"]
+    },
+    {
+      "id": "autoupdater-show-config",
+      "name": "Show AutoUpdater Configuration",
+      "script": "autoupdatercli edit_configuration operation=show_config",
+      "risk": "safe",
+      "description": "Shows the current AutoUpdater configuration without changing it.",
+      "tags": ["AutoUpdater", "Configuration", "Monitoring"]
+    },
+    {
+      "id": "autoupdater-check-now",
+      "name": "Check for Urgent Security Updates Now",
+      "script": "autoupdatercli update_component urgent_security_updates",
+      "risk": "caution",
+      "description": "Triggers an immediate check for available Urgent Security Updates.",
+      "tags": ["AutoUpdater", "Installation"]
+    },
+    {
+      "id": "autoupdater-maintenance-window",
+      "name": "Configure Urgent Update Maintenance Window",
+      "script": "autoupdatercli enable_maintenance_window urgent_security_updates '{\"hour\":7,\"minutes\":30,\"days_specification\":\"by day in week\",\"day_of_week\":[\"Thu\"]}'",
+      "risk": "caution",
+      "description": "Configures a maintenance window in which Urgent Security Updates can be downloaded and installed. Review and edit the schedule before running.",
+      "tags": ["AutoUpdater", "Configuration"]
+    },
+    {
+      "id": "autoupdater-stop",
+      "name": "Stop AutoUpdater",
+      "script": "autoupdatercli stop",
+      "risk": "caution",
+      "description": "Stops the AutoUpdater process. Use only for troubleshooting or offline installation work.",
+      "tags": ["AutoUpdater", "Troubleshooting"]
+    },
+    {
+      "id": "autoupdater-install",
+      "name": "Install Offline CPLP Package",
+      "script": "autoupdatercli install /full/path/package.tar",
+      "risk": "caution",
+      "description": "Installs an approved offline CPLP package. Replace the example path before running.",
+      "tags": ["AutoUpdater", "Installation"]
+    },
+    {
+      "id": "autoupdater-disable-checks",
+      "name": "Disable AutoUpdater Checks",
+      "script": "autoupdatercli set_check_for_updates_interval 0",
+      "risk": "caution",
+      "description": "Sets the update-check interval to zero, which disables automatic update checks.",
+      "tags": ["AutoUpdater", "Configuration"]
+    },
+    {
+      "id": "autoupdater-disable-urgent",
+      "name": "Disable Urgent Security Updates",
+      "script": "autoupdatercli disable urgent_security_updates",
+      "risk": "danger",
+      "description": "Disables automatic Urgent Security Updates. Use only after security-risk review and Check Point guidance.",
+      "tags": ["AutoUpdater", "Security"]
+    },
+    {
+      "id": "cplp-revert",
+      "name": "Revert Live Patch Protection",
+      "script": "cplp revert",
+      "risk": "danger",
+      "description": "Reverts Live Patch protection. Use only with Check Point Support guidance and after confirming the required options.",
+      "tags": ["CPLP", "Rollback"]
+    }
+  ]
+}
