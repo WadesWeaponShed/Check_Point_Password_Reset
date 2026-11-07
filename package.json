@@ -1,0 +1,17 @@
+{
+  "name": "check-point-password-changer",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Bulk Gaia password hash reset for managed gateways and cluster members.",
+  "type": "module",
+  "scripts": {
+    "start": "node src/server.js",
+    "dev": "node --watch src/server.js",
+    "check": "node --check src/server.js && node --check public/password-app.js && node --check public/result-view.js && node --check src/workflows/password-reset.js && node --test",
+    "catalog:update": "node scripts/generate-command-catalog.mjs",
+    "catalog:sync": "node scripts/update-catalogs.mjs"
+  },
+  "engines": {
+    "node": ">=18"
+  }
+}

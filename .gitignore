@@ -1,0 +1,4 @@
+node_modules/
+.catalog-cache/
+.env
+.DS_Store
