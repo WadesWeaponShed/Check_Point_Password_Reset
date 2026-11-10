@@ -1,6 +1,6 @@
 # Check Point Password Changer
 
-Reset **Gaia user passwords** or the **Expert mode password** across selected gateways, cluster members, and Check Point servers from one local workbench.
+Reset **Gaia user passwords** or the **Expert mode password**, or recover a Gaia user login using a new password, across selected gateways, cluster members, and Check Point servers from one local workbench.
 
 All device access goes through the connected **SMS, CMA, or Smart-1 Cloud Management API**. The app uses `run-script` and polls `show-task` for completion. It does not connect directly to devices over SSH or require their existing login passwords.
 
@@ -169,14 +169,15 @@ No targets are selected automatically. Choose individual targets or **Select All
 
 **Refresh Inventory & SIC** repeats discovery, SIC testing, and platform detection, and clears the selection. **Test SIC** reruns SIC and platform checks for currently selected targets; it is an additional refresh, not a replacement for the automatic checks. A selected device that no longer qualifies is removed from selection.
 
-### 3. Prepare the password hash
+### 3. Prepare a Password Hash or Account Recovery
 
 Under **Password to change**, choose:
 
 - **Gaia user password** — enter an existing username, such as `admin`. The app does not create users.
+- **Recover Gaia user access (password)** — set a new plaintext password for an existing Gaia user if a hash change leaves you unable to log in. Follow the recovery instructions below.
 - **Expert mode password** — changes the system-wide Expert credential on each selected target. No username is required. Gaia user login passwords and GRUB credentials are not changed.
 
-Generate a hash from matching password fields, or paste a raw SHA-512 crypt hash. Switching password type clears the prepared password/hash and confirmation.
+For either hash-based option, generate a hash from matching password fields, or paste a raw SHA-512 crypt hash. Recovery uses the password fields directly and does not generate a hash. Switching password type clears the prepared password/hash and confirmation.
 
 The generator creates a new random 16-character salt and uses 5,000 rounds. Accepted hashes have this format:
 
@@ -190,13 +191,25 @@ Generated passwords must contain at least 6 characters and at most 128 UTF-8 byt
 
 **Check the password policy on all selected targets.** A pasted hash cannot reveal whether its original password meets length, character, or complexity requirements. Keep a recovery session open and verify access after the change.
 
+### Account Recovery After a Failed Hash Change
+
+Choose **Recover Gaia user access (password)** under **Password to change**. Use **Password & Recovery** in the left menu, enter the existing Gaia username (for example, `admin`), and enter the new password twice. Choose **Review Change**, check the target scope, type `RESET N` for the selected target count, then choose **Apply Recovery Password**. You do not need the current Gaia user password. This uses the same automatically discovered inventory, mandatory SIC/platform checks, Select All eligibility, lock recovery, task polling, and Security Group scope as hash resets.
+
+The manager submits `clish -c 'set user <username> newpass <password>'`, checks the command result, then runs `clish -c 'save config'`. Confirmed Security Groups use `gclish` for both commands. OpenSSL is not needed for this mode. This app calls the authenticated Management API; no local `mgmt_cli -r true` or target SSH login is required.
+
+Recovery requires working management API access and SIC. It does not repair SIC, unlock a locked-out account, create users, or change the Expert password. Password policy still applies. For unambiguous Clish input, this mode accepts 6–128 ASCII characters using letters, digits, and `@ % _ + = : , . / ? -`; whitespace and other punctuation are rejected before submission.
+
+**The plaintext password is sent to the manager inside the script and may be retained in manager task/audit records or be visible to privileged process inspection on the target.** The app conceals it in previews and exports and suppresses raw recovery command output. Recovery failures report a safe diagnostic category instead. Verify a new login after success; there is no rollback.
+
+**Expert recovery:** Use **Expert mode password** with a valid hash. The plaintext Gaia user recovery option does not apply to Expert mode. In our lab test, piping responses to `set expert-password` still requested the current Expert password and rejected the attempt; it is not implemented as an automated recovery method.
+
 ### 4. Review and apply
 
-Review the selected count, password type, command preview, and scope warning. Type **`RESET N`**, replacing `N` with the selected target count, then choose **Apply Password Hash**.
+Review the selected count, password type, command preview, and scope warning. Type **`RESET N`**, replacing `N` with the selected target count, then choose **Apply Password Hash** for a hash change or **Apply Recovery Password** for Gaia account recovery.
 
 Immediately before changing each target, the app automatically rechecks SIC and platform eligibility. A failed check skips that target. A platform change since review also skips the target and requires a new review.
 
-The manager executes the password command using `clish -s -c` for standard Gaia or `gclish -s -c` for a confirmed Security Group. The `-s` option saves configuration. No management policy publish is required.
+For hash changes, the manager executes the password command using `clish -s -c` for standard Gaia or `gclish -s -c` for a confirmed Security Group. The `-s` option saves configuration. No management policy publish is required.
 
 ### 5. Review results and verify access
 
@@ -226,7 +239,7 @@ A successful global command and healthy member count do not prove that a new log
 
 ## Configuration-lock recovery
 
-For either password type, an explicit configuration-lock failure triggers recovery through the manager:
+For hash resets and Gaia account recovery, an explicit configuration-lock failure triggers recovery through the manager:
 
 1. Run `lock database override` using the target's selected shell: Clish or gClish.
 2. Confirm that the override task succeeded, then wait 1.5 seconds before retrying the password command.
@@ -240,7 +253,7 @@ This takes the configuration lock from another admin session. Coordinate with ot
 - Only one reset job can run in an app session at a time. Up to ten completed job records are retained in that session.
 - Plaintext passwords used for hashing go to the local app server's OpenSSL process through stdin, not shell arguments. Password fields clear after successful generation. Clear the prepared hash when finished.
 - Check Point credentials and SIDs stay server-side. The app does not use browser storage. Script bodies are redacted from optional request logs, and the reset wrapper redacts hashes from returned device diagnostics.
-- The manager receives the hash in the script payload and may retain it in its own task or audit records. Treat hashes and exported diagnostics as sensitive.
+- The manager receives the hash (or plaintext password in recovery mode) in the script payload and may retain it in its own task or audit records. Treat hashes and exported diagnostics as sensitive.
 - The app listens on localhost by default and is intended for a trusted local operator. Add authentication and HTTPS before exposing it remotely. Inherited generic API routes are not a multi-user authorization boundary.
 
 SIC requests have a 120-second timeout. Script polling has a default 180-second budget with intervals that back off up to 4 seconds. `TASK_POLL_ATTEMPTS` and `TASK_POLL_INTERVAL_MS` configure the normal polling budget; large-environment mode uses its separate interval. `RUN_SCRIPT_CONCURRENCY` defaults to 8, reduced to 3 in large-environment mode.
