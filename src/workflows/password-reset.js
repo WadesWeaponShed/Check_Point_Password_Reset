@@ -1,7 +1,7 @@
 import { detectPlatform } from './platform.js';
 import { runWithLockRecovery } from './gaia-lock.js';
 import { randomUUID } from 'node:crypto';
-import { formatClishPasswordCommand } from '../../public/password-hash-format.js';
+import { formatClishPasswordCommand, formatRecoveryPasswordCommand } from '../../public/password-hash-format.js';
 const token = value => String(value || '').toLowerCase().replace(/[^a-z0-9]/g, '');
 const cluster = o => ['simplecluster', 'cpmigatewaycluster', 'clusterxl'].includes(token(o.type));
 const member = o => token(o.type).includes('cluster') && token(o.type).includes('member');
@@ -75,12 +75,35 @@ export function buildResetScript(username, hash, passwordType = 'user', shell = 
     `printf 'CP_RESET_SAVED\\n'`
   ].join('\n');
 }
+export function buildRecoveryScript(username, password, shell = 'clish') {
+  const command = formatRecoveryPasswordCommand(username, password, shell);
+  return [
+    'set +x',
+    `out=$(${command} 2>&1)`,
+    'rc=$?',
+    // Never return raw Clish diagnostics: they can echo the plaintext command.
+    `if printf '%s' "$out" | grep -Eiq 'CLINFR0771|CLINFR0519|config(uration)? lock (is owned|present)|lock database override'; then`,
+    "  printf 'CP_RESET_FAILED configuration lock present\\n'; exit 1",
+    'fi',
+    `if [ "$rc" -ne 0 ] || printf '%s' "$out" | grep -Eiq 'CLINFR|CLISH|error|failed|invalid|denied|not found|does not exist|not allowed|locked'; then`,
+    "  printf 'CP_RESET_FAILED password command rejected; check password policy and user existence\\n'; exit 1",
+    'fi',
+    `out=$(${shell} -c 'save config' 2>&1)`,
+    'rc=$?',
+    `if [ "$rc" -ne 0 ] || printf '%s' "$out" | grep -Eiq 'CLINFR|CLISH|error|failed|invalid|denied|locked'; then`,
+    "  printf 'CP_RESET_FAILED configuration save unverified; password may already be changed\\n'; exit 1",
+    'fi',
+    "printf 'CP_RESET_SAVED\\n'"
+  ].join('\n');
+}
 export function startResetJob(sessions, sessionId, body) {
   const session = sessions.get(sessionId);
   const targets = selectedTargets(session, body.targets);
   if (body.confirmation !== `RESET ${targets.length}`) throw new Error(`Type RESET ${targets.length} to confirm.`);
   const passwordType = body.passwordType ?? 'user';
-  formatClishPasswordCommand(body.username, body.hash, passwordType);
+  const recovery = passwordType === 'recovery';
+  if (recovery) formatRecoveryPasswordCommand(body.username, body.password);
+  else formatClishPasswordCommand(body.username, body.hash, passwordType);
   session.passwordJobs ||= new Map();
   if ([...session.passwordJobs.values()].some(j => j.state === 'running')) throw new Error('A reset is already running. Wait for it to finish.');
   const job = { id: randomUUID(), state: 'running', passwordType, username: passwordType === 'expert' ? null : body.username, startedAt: new Date().toISOString(), rows: targets.map(t => ({ ...t, reviewedPlatform: t.platform, status: 'Queued', message: '' })) };
@@ -96,20 +119,26 @@ export function startResetJob(sessions, sessionId, body) {
       if (!sic.platformReady) { row.status = 'Skipped'; row.message = sic.platformMessage || 'Platform unverified. Reset blocked.'; return; }
       if (row.reviewedPlatform && row.reviewedPlatform !== sic.platform) { row.status = 'Skipped'; row.message = 'Platform changed since review. Refresh inventory and review the scope again.'; return; }
       row.status = 'Applying';
-      const script = buildResetScript(body.username, body.hash, passwordType, sic.shell);
-      const response = await runWithLockRecovery({ sessions, sessionId, target: row.name, shell: sic.shell, body: { 'script-name': passwordType === 'expert' ? 'Gaia Expert password reset' : 'Gaia user password reset', script }, onProgress: status => { row.status = status; } });
-      const safe = JSON.stringify(response).replaceAll(body.hash, '[redacted hash]').replaceAll(body.hash.replaceAll('$', '\\$'), '[redacted hash]');
-      row.details = JSON.parse(safe);
+      const script = recovery ? buildRecoveryScript(body.username, body.password, sic.shell) : buildResetScript(body.username, body.hash, passwordType, sic.shell);
+      const response = await runWithLockRecovery({ sessions, sessionId, target: row.name, shell: sic.shell, body: { 'script-name': recovery ? 'Gaia user password recovery' : passwordType === 'expert' ? 'Gaia Expert password reset' : 'Gaia user password reset', script }, onProgress: status => { row.status = status; } });
+      const secret = recovery ? body.password : body.hash;
+      const safe = JSON.stringify(response).replaceAll(secret, '[redacted secret]').replaceAll(JSON.stringify(secret).slice(1, -1), '[redacted secret]').replaceAll(secret.replaceAll('$', '\\$'), '[redacted secret]');
+      row.details = recovery ? {
+        completion: response.completion,
+        taskSummary: (response.taskSummary || []).map(task => ({ id: task.id, status: task.status, progress: task.progress })),
+        lockRecovery: (response.lockRecovery || []).map(attempt => ({ phase: attempt.phase, completion: attempt.completion })),
+        note: 'Raw manager diagnostics omitted for plaintext password recovery.'
+      } : JSON.parse(safe);
       if (response.completion === 'succeeded' && response.output.trim() === 'CP_RESET_SAVED' && sic.shell === 'gclish') {
         row.status = 'Verifying Security Group';
         const verification = await detectPlatform(sessions, sessionId, row);
         row.details.groupVerification = verification;
         if (!verification.platformReady || verification.platform !== 'scalable' || verification.memberCount !== sic.memberCount) { row.status = 'Unknown'; row.message = 'Global password command completed, but Security Group availability changed or could not be verified afterward. Check all members before retrying.'; return; }
       }
-      if (response.completion === 'succeeded' && response.output.trim() === 'CP_RESET_SAVED') { row.status = 'Succeeded'; row.message = sic.shell === 'gclish' ? 'Group-wide gClish password command completed and configuration saved. Verify access on all members.' : 'Password hash applied and configuration saved.'; }
+      if (response.completion === 'succeeded' && response.output.trim() === 'CP_RESET_SAVED') { row.status = 'Succeeded'; row.message = sic.shell === 'gclish' ? 'Group-wide gClish password command completed and configuration saved. Verify access on all members.' : recovery ? 'Recovery password applied and configuration saved. Verify a new login.' : 'Password hash applied and configuration saved.'; }
       else { row.status = response.completion === 'unknown' ? 'Unknown' : 'Failed'; row.message = response.recoveryMessage || (response.completion === 'unknown' ? 'Completion unverified. The task may still be running. Check the gateway before retrying.' : 'Reset or save could not be verified. Inspect task details; the password may already have changed.'); }
     } catch { row.status = 'Unknown'; row.message = 'Execution could not be verified. Check the gateway before retrying.'; }
-  }).finally(() => { job.state = 'complete'; job.finishedAt = new Date().toISOString(); });
+  }).finally(() => { body.password = ''; body.hash = ''; job.state = 'complete'; job.finishedAt = new Date().toISOString(); });
   return { jobId: job.id };
 }
 export async function runSicTests(sessions, sessionId, ids) {
