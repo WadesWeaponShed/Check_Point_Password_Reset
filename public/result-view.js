@@ -64,7 +64,7 @@ export function renderExecutionResults(job, root) {
       for(const step of recovery){const li=element('li');li.append(element('span','',step.phase),element('span',`status ${stateClass(step.completion==='succeeded'?'Succeeded':step.completion==='failed'?'Failed':'Unknown')}`,step.completion || 'Unknown'));steps.append(li);}
       details.append(steps);article.append(details);
     }
-    if(row.details){const details=element('details','raw-execution');details.dataset.detailKey=`${index}-raw`;details.open=opened.has(details.dataset.detailKey);details.append(element('summary','','Technical details · hash redacted'),element('pre','',JSON.stringify(row.details,null,2)));article.append(details);}
+    if(row.details){const details=element('details','raw-execution');details.dataset.detailKey=`${index}-raw`;details.open=opened.has(details.dataset.detailKey);details.append(element('summary','','Technical details · secrets redacted'),element('pre','',JSON.stringify(row.details,null,2)));article.append(details);}
     list.append(article);
   }
   root.append(list);

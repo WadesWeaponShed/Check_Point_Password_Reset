@@ -1,6 +1,6 @@
 import { renderExecutionResults } from './result-view.js';
 import { communicatingTargetIds, groupTargetsBySic } from './target-selection.js';
-import { formatClishPasswordCommand } from './password-hash-format.js';
+import { formatClishPasswordCommand, formatRecoveryPasswordCommand } from './password-hash-format.js';
 const $ = id => document.getElementById(id);
 let session, targets = [], selected = new Set(), sic = new Map(), job, running = false, polling;
 const emptyResultState = $('resultRows').firstElementChild.cloneNode(true);
@@ -33,16 +33,20 @@ function busy(value) {
   renderTargets(); review();
 }
 function review() {
-  const count = selected.size, username = $('resetUsername').value, expert = $('passwordType').value === 'expert';
+  const count = selected.size, username = $('resetUsername').value, expert = $('passwordType').value === 'expert', recovery = $('passwordType').value === 'recovery';
   $('reviewSummary').textContent = `${count} selected target${count === 1 ? '' : 's'} · ${expert ? 'Expert mode password' : `Gaia user: ${username || '(required)'}`}. SIC is checked again immediately before each reset.`;
   $('confirmation').placeholder = `RESET ${count}`;
   const groupTargets = targets.filter(t => selected.has(t.id) && sic.get(t.id)?.shell === 'gclish');
   const shells = [...new Set(targets.filter(t => selected.has(t.id)).map(t => sic.get(t.id)?.shell).filter(Boolean))];
   $('commandPreview').textContent = expert ? 'clish -s -c "set expert-password-hash [SHA-512 hash]"' : `clish -s -c "set user ${username} password-hash [SHA-512 hash]"`;
   if (shells.length) $('commandPreview').textContent = shells.map(shell => expert ? `${shell} -s -c "set expert-password-hash [SHA-512 hash]"` : `${shell} -s -c "set user ${username} password-hash [SHA-512 hash]"`).join('\n');
+  if (recovery) $('commandPreview').textContent = (shells.length ? shells : ['clish']).map(shell => `${shell} -c 'set user ${username} newpass [concealed password]' && ${shell} -c 'save config'`).join('\n');
+  $('resetButton').textContent = recovery ? 'Apply Recovery Password' : 'Apply Password Hash';
   $('resetWarning').textContent = `This changes ${expert ? 'the system-wide Expert mode password' : "the named Gaia user's password"} immediately on each selected target and saves configuration. Only communicating targets proceed. If Gaia reports a configuration lock, the manager will override the existing admin session’s lock and retry up to three times. There is no automatic rollback. Keep a recovery session open and verify ${expert ? 'Expert access' : 'a new login'}.`;
+  if (recovery) $('resetWarning').textContent += ' Recovery sends a plaintext password in the manager script; it may be retained in manager task or audit records. This requires working SIC and API permissions.';
   if (groupTargets.length) $('resetWarning').textContent += ` Group-wide scope: ${groupTargets.map(t=>t.name).join(', ')}. gClish applies to all members and sites of each selected Security Group.`;
-  let valid = false; try { formatClishPasswordCommand(username, $('resetHash').value, $('passwordType').value); valid = true; } catch {}
+  $('recoveryValidation').textContent = '';
+  let valid = false; try { if (recovery) { formatRecoveryPasswordCommand(username, $('newPassword').value); if (!validatePasswordMatch()) throw new Error('Mismatch'); } else formatClishPasswordCommand(username, $('resetHash').value, $('passwordType').value); valid = true; } catch (error) { if (recovery && $('newPassword').value && error.message !== 'Mismatch') $('recoveryValidation').textContent = error.message; }
   $('navSelected').textContent = String(count);
   $('navHash').textContent = valid ? 'Ready' : '';
   $('resetButton').disabled = running || !count || !valid || $('confirmation').value !== `RESET ${count}`;
@@ -152,8 +156,8 @@ $('selectAll').addEventListener('click',()=>{selected=new Set(communicatingTarge
 $('selectNone').addEventListener('click',()=>{selected.clear();renderTargets();invalidate();});$('targetSearch').addEventListener('input',renderTargets);
 $('sicButton').addEventListener('click',async()=>{if(!selected.size)return status('Select targets first.');busy(true);status('Testing SIC on selected targets…');try{const data=await api('sic-test',{targets:[...selected]});data.rows.forEach(r=>sic.set(r.id,r));status(`${data.rows.filter(r=>r.communicating).length} of ${data.rows.length} targets communicating.`);}catch(e){status(e.message);}finally{busy(false);}});
 $('hashMode').addEventListener('change',()=>{const existing=$('hashMode').value==='existing';clearSecrets();document.querySelectorAll('.generate-field').forEach(e=>e.classList.toggle('hidden',existing));$('resetHash').readOnly=!existing;});
-$('hashForm').addEventListener('submit',async e=>{e.preventDefault();if(running)return;if(!validatePasswordMatch(true)){$('hashStatus').textContent='Passwords do not match. Correct the highlighted confirmation field.';$('confirmPassword').focus();return;}const b=e.submitter;b.disabled=true;$('resetHash').value='';invalidate();try{const data=await api('password-hash',{password:$('newPassword').value});$('resetHash').value=data.hash;$('newPassword').value='';$('confirmPassword').value='';$('hashStatus').textContent='SHA-512 crypt hash generated with a fresh random salt and 5,000 rounds.';}catch(e){$('hashStatus').textContent=e.message;}finally{b.disabled=false;review();}});
-$('passwordType').addEventListener('change',()=>{const expert=$('passwordType').value==='expert';$('resetUsernameField').classList.toggle('hidden',expert);$('resetUsername').required=!expert;clearSecrets();});
+$('hashForm').addEventListener('submit',async e=>{e.preventDefault();if(running)return;if($('passwordType').value==='recovery'){showPanel('reviewPanel',true);return;}if(!validatePasswordMatch(true)){$('hashStatus').textContent='Passwords do not match. Correct the highlighted confirmation field.';$('confirmPassword').focus();return;}const b=e.submitter;b.disabled=true;$('resetHash').value='';invalidate();try{const data=await api('password-hash',{password:$('newPassword').value});$('resetHash').value=data.hash;$('newPassword').value='';$('confirmPassword').value='';$('hashStatus').textContent='SHA-512 crypt hash generated with a fresh random salt and 5,000 rounds.';}catch(e){$('hashStatus').textContent=e.message;}finally{b.disabled=false;review();}});
+$('passwordType').addEventListener('change',()=>{const expert=$('passwordType').value==='expert', recovery=$('passwordType').value==='recovery';$('resetUsernameField').classList.toggle('hidden',expert);$('resetUsername').required=!expert;clearSecrets();for(const id of ['hashSourceField','hashValueField','generateButtonField'])$(id).classList.toggle('hidden',recovery);$('recoveryNotice').classList.toggle('hidden',!recovery);document.querySelectorAll('.generate-field').forEach(e=>e.classList.toggle('hidden',!recovery && $('hashMode').value==='existing'));$('generateButtonField').classList.toggle('hidden',recovery || $('hashMode').value==='existing');$('hashStatus').textContent=recovery?'Enter and confirm a recovery password, then review the change.':'No hash generated.';});
 $('clearSecrets').addEventListener('click',clearSecrets);$('newPassword').addEventListener('input',()=>{ $('resetHash').value='';validatePasswordMatch();invalidate(); });$('confirmPassword').addEventListener('input',()=>{ $('resetHash').value='';validatePasswordMatch();invalidate(); });$('resetUsername').addEventListener('input',invalidate);$('resetHash').addEventListener('input',invalidate);$('confirmation').addEventListener('input',review);
 function renderJob() {
   const {done: finished, succeeded} = renderExecutionResults(job, $('resultRows'));
@@ -164,7 +168,7 @@ async function pollJob(id) {
   try{job=await api('reset/status',{jobId:id});renderJob();if(job.state==='running'){polling=setTimeout(()=>pollJob(id),1000);}else{busy(false);status('Reset finished. Review every target result and verify a new login.');}}
   catch(e){status(`${e.message} Status will be retried; do not resubmit the reset.`);polling=setTimeout(()=>pollJob(id),5000);}
 }
-$('resetButton').addEventListener('click',async()=>{if($('resetButton').disabled)return;const body={passwordType:$('passwordType').value,targets:[...selected],username:$('resetUsername').value,hash:$('resetHash').value,confirmation:$('confirmation').value};busy(true);status('Starting password reset…');try{const result=await api('reset/start',body);clearSecrets();showPanel('resultPanel',true);void pollJob(result.jobId);}catch(e){status(e.message);busy(false);}finally{body.hash='';}});
+$('resetButton').addEventListener('click',async()=>{if($('resetButton').disabled)return;const body={passwordType:$('passwordType').value,targets:[...selected],username:$('resetUsername').value,hash:$('resetHash').value,password:$('passwordType').value==='recovery'?$('newPassword').value:undefined,confirmation:$('confirmation').value};busy(true);status('Starting password reset…');try{const result=await api('reset/start',body);clearSecrets();showPanel('resultPanel',true);void pollJob(result.jobId);}catch(e){status(e.message);busy(false);}finally{body.hash='';body.password='';}});
 $('exportButton').addEventListener('click',()=>{const blob=new Blob([JSON.stringify(job,null,2)],{type:'application/json'});const url=URL.createObjectURL(blob),a=document.createElement('a');a.href=url;a.download=`password-reset-${job.id}.json`;a.click();setTimeout(()=>URL.revokeObjectURL(url),1000);});
 $('logoutButton').addEventListener('click',async()=>{try{await api('logout');clearTimeout(polling);clearSecrets();session=null;targets=[];selected.clear();sic.clear();job=null;$('resultRows').replaceChildren(emptyResultState.cloneNode(true));$('jobStatus').textContent='No reset has been started.';$('navResults').textContent='0';$('exportButton').disabled=true;renderTargets();$('workspace').classList.add('hidden');$('loginCard').classList.remove('hidden');$('loginStatus').textContent='Logged out.';$('loginStatus').className='status-card full-row';}catch(e){status(e.message);}});
 review();
