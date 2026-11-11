@@ -51,10 +51,29 @@ export function renderExecutionResults(job, root) {
     const article=element('article','execution-target');
     const head=element('div','execution-target-head');
     head.append(element('h4','',row.name),element('span',`status ${stateClass(row.status)}`,row.status));
+    const verification = {
+      MATCH: 'Stored Hash Verified',
+      MISMATCH: 'Stored Hash Mismatch',
+      USER_NOT_FOUND: 'Hash Check: User Not Found',
+      UNAVAILABLE: 'Stored Hash Unverified'
+    }[row.hashVerification];
+    if (verification) {
+      const status = row.hashVerification === 'MATCH' ? 'Succeeded' : 'Failed';
+      head.append(element('span', `status ${stateClass(status)}`, verification));
+    }
     article.append(head);
     const identity=[row.ip,row.kind,row.cluster,row.shell === 'gclish' ? 'Group-wide gClish' : row.shell === 'clish' ? 'Local Gaia Clish' : ''].filter(Boolean).join(' · ');
     if(identity)article.append(element('p','execution-identity',identity));
     article.append(element('p','execution-message',row.message || (terminal.has(row.status) ? 'No additional message returned.' : 'Waiting for the manager to return the task result.')));
+    if (row.hashMismatch) {
+      const { format, algorithm, rounds, salt, digest } = row.hashMismatch;
+      const method = { 1: 'MD5', 5: 'SHA-256', 6: 'SHA-512' }[format];
+      const describe = value => value === 'SAME' ? 'matches' : 'differs';
+      const description = method
+        ? `Stored method: ${method}. Algorithm ${describe(algorithm)}; rounds ${describe(rounds)}; salt ${describe(salt)}; digest ${describe(digest)}.`
+        : format === 'LOCKED' ? 'The stored password field is marked locked or disabled.' : 'The stored password field is empty or uses an unrecognized format.';
+      article.append(element('p', 'execution-message', description));
+    }
     const recovery=row.details?.lockRecovery;
     if(recovery?.length) {
       const details=element('details','recovery-details');details.dataset.detailKey=`${index}-recovery`;details.open=opened.has(details.dataset.detailKey);

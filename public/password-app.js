@@ -1,6 +1,6 @@
 import { renderExecutionResults } from './result-view.js';
 import { communicatingTargetIds, groupTargetsBySic } from './target-selection.js';
-import { formatClishPasswordCommand, formatRecoveryPasswordCommand } from './password-hash-format.js';
+import { disallowedHashPasswordMessage, identifyHashMethod, formatClishPasswordCommand, formatRecoveryPasswordCommand } from './password-hash-format.js';
 const $ = id => document.getElementById(id);
 let session, targets = [], selected = new Set(), sic = new Map(), job, running = false, polling;
 const emptyResultState = $('resultRows').firstElementChild.cloneNode(true);
@@ -27,19 +27,21 @@ async function api(path, body = {}) {
 function status(message) { $('appStatus').textContent = message; }
 function busy(value) {
   running = value;
-  for (const id of ['discoverButton','selectAll','selectNone','sicButton','logoutButton','passwordType','resetUsername','hashMode','newPassword','confirmPassword','resetHash','clearSecrets','confirmation']) $(id).disabled = value;
+  for (const id of ['discoverButton','selectAll','selectNone','sicButton','logoutButton','passwordType','resetUsername','hashMode','hashMethod','newPassword','confirmPassword','resetHash','clearSecrets','confirmation']) $(id).disabled = value;
   document.querySelector('#hashForm button[type=submit]').disabled = value;
   $('workspace').setAttribute('aria-busy', String(value));
   renderTargets(); review();
 }
+const hashMethodNames = { sha512: 'SHA-512', sha256: 'SHA-256', md5: 'MD5' };
 function review() {
+  const hashLabel = hashMethodNames[identifyHashMethod($('resetHash').value)] || hashMethodNames[$('hashMethod').value];
   const count = selected.size, username = $('resetUsername').value, expert = $('passwordType').value === 'expert', recovery = $('passwordType').value === 'recovery';
   $('reviewSummary').textContent = `${count} selected target${count === 1 ? '' : 's'} · ${expert ? 'Expert mode password' : `Gaia user: ${username || '(required)'}`}. SIC is checked again immediately before each reset.`;
   $('confirmation').placeholder = `RESET ${count}`;
   const groupTargets = targets.filter(t => selected.has(t.id) && sic.get(t.id)?.shell === 'gclish');
   const shells = [...new Set(targets.filter(t => selected.has(t.id)).map(t => sic.get(t.id)?.shell).filter(Boolean))];
-  $('commandPreview').textContent = expert ? 'clish -s -c "set expert-password-hash [SHA-512 hash]"' : `clish -s -c "set user ${username} password-hash [SHA-512 hash]"`;
-  if (shells.length) $('commandPreview').textContent = shells.map(shell => expert ? `${shell} -s -c "set expert-password-hash [SHA-512 hash]"` : `${shell} -s -c "set user ${username} password-hash [SHA-512 hash]"`).join('\n');
+  $('commandPreview').textContent = expert ? `clish -s -c "set expert-password-hash [${hashLabel} hash]"` : `clish -s -c "set user ${username} password-hash [${hashLabel} hash]"`;
+  if (shells.length) $('commandPreview').textContent = shells.map(shell => expert ? `${shell} -s -c "set expert-password-hash [${hashLabel} hash]"` : `${shell} -s -c "set user ${username} password-hash [${hashLabel} hash]"`).join('\n');
   if (recovery) $('commandPreview').textContent = (shells.length ? shells : ['clish']).map(shell => `${shell} -c 'set user ${username} newpass [concealed password]' && ${shell} -c 'save config'`).join('\n');
   $('resetButton').textContent = recovery ? 'Apply Recovery Password' : 'Apply Password Hash';
   $('resetWarning').textContent = `This changes ${expert ? 'the system-wide Expert mode password' : "the named Gaia user's password"} immediately on each selected target and saves configuration. Only communicating targets proceed. If Gaia reports a configuration lock, the manager will override the existing admin session’s lock and retry up to three times. There is no automatic rollback. Keep a recovery session open and verify ${expert ? 'Expert access' : 'a new login'}.`;
@@ -52,13 +54,114 @@ function review() {
   $('resetButton').disabled = running || !count || !valid || $('confirmation').value !== `RESET ${count}`;
 }
 function invalidate() { $('confirmation').value = ''; review(); }
+const inventoryColumns = [
+  ['Selection', (t, state, eligible) => !eligible.has(t.id) ? 'Excluded' : selected.has(t.id) ? 'Selected' : 'Unselected'],
+  ['Target', t => t.name],
+  ['IP Address', t => t.ip || 'Not returned'],
+  ['Type / Cluster', (t, state) => [t.kind, t.cluster, state?.platformLabel].filter(Boolean).join(' ')],
+  ['SIC', (t, state) => state?.status || 'Not tested'],
+  ['Hashing', (t, state) => state?.hashMethod || (state?.communicating ? 'Unavailable' : '—')]
+];
+const inventoryOrder = new Intl.Collator(undefined, { numeric: true, sensitivity: 'base' });
+const inventoryViews = new Map();
+for (const id of ['targetRows', 'failingSicRows']) {
+  const headers = [...$(id).closest('table').querySelectorAll('th')];
+  const view = { column: 1, direction: 1, filters: [], headers };
+  inventoryViews.set(id, view);
+  headers.forEach((header, index) => {
+    const [label] = inventoryColumns[index];
+    const button = document.createElement('button');
+    button.type = 'button';
+    button.className = 'inventory-sort';
+    const filter = document.createElement('button');
+    filter.type = 'button';
+    filter.className = 'inventory-filter';
+    filter.setAttribute('aria-label', `Filter ${label} — ${id === 'targetRows' ? 'available targets' : 'failing SIC'}`);
+    const panel = document.createElement('div');
+    panel.className = 'inventory-filter-panel';
+    panel.setAttribute('popover', 'auto');
+    panel.setAttribute('role', 'group');
+    panel.setAttribute('aria-label', `${label} filter values`);
+    const all = document.createElement('input');
+    all.type = 'checkbox';
+    const allLabel = document.createElement('label');
+    allLabel.append(all, ' Select All Values');
+    const options = document.createElement('div');
+    options.className = 'inventory-filter-options';
+    panel.append(allLabel, options);
+    const control = { button: filter, all, options, excluded: new Set(), values: [] };
+    view.filters.push(control);
+    filter.setAttribute('aria-expanded', 'false');
+    panel.addEventListener('toggle', () => filter.setAttribute('aria-expanded', String(panel.matches(':popover-open'))));
+    filter.addEventListener('click', () => {
+      if (panel.matches(':popover-open')) return panel.hidePopover();
+      panel.showPopover();
+      const anchor = filter.getBoundingClientRect();
+      panel.style.left = `${Math.max(8, Math.min(anchor.left, innerWidth - panel.offsetWidth - 8))}px`;
+      panel.style.top = `${Math.max(8, Math.min(anchor.bottom + 4, innerHeight - panel.offsetHeight - 8))}px`;
+    });
+    all.addEventListener('change', () => {
+      control.excluded = new Set(all.checked ? [] : control.values);
+      renderTargets();
+    });
+    button.addEventListener('click', () => {
+      view.direction = view.column === index ? -view.direction : 1;
+      view.column = index;
+      renderTargets();
+    });
+    header.replaceChildren(button, filter, panel);
+  });
+}
+function inventoryRows(id, rows, eligible, sourceRows) {
+  const view = inventoryViews.get(id);
+  view.headers.forEach((header, index) => {
+    const active = index === view.column;
+    const label = inventoryColumns[index][0];
+    if (active) header.setAttribute('aria-sort', view.direction === 1 ? 'ascending' : 'descending');
+    else header.removeAttribute('aria-sort');
+    header.firstElementChild.textContent = `${label} ${active ? view.direction === 1 ? '↑' : '↓' : '↕'}`;
+  });
+  const value = (target, index) => inventoryColumns[index][1](target, sic.get(target.id), eligible);
+  view.filters.forEach((control, index) => {
+    const values = [...new Set(sourceRows.map(target => value(target, index)))].sort(inventoryOrder.compare);
+    if (JSON.stringify(values) !== JSON.stringify(control.values)) {
+      control.values = values;
+      control.options.replaceChildren(...values.map(option => {
+        const checkbox = document.createElement('input');
+        checkbox.type = 'checkbox';
+        checkbox.addEventListener('change', () => {
+          if (checkbox.checked) control.excluded.delete(option);
+          else control.excluded.add(option);
+          renderTargets();
+        });
+        const label = document.createElement('label');
+        label.append(checkbox, option);
+        return label;
+      }));
+    }
+    let included = 0;
+    Array.from(control.options.children).forEach((label, i) => {
+      label.firstChild.checked = !control.excluded.has(values[i]);
+      if (label.firstChild.checked) included++;
+    });
+    control.all.disabled = !values.length;
+    control.all.checked = !!values.length && included === values.length;
+    control.all.indeterminate = included > 0 && included < values.length;
+    control.button.textContent = included === values.length ? 'All values ▾' : `${included}/${values.length} values ▾`;
+  });
+  return rows.filter(target => view.filters.every((control, index) => !control.excluded.has(value(target, index))))
+    .sort((a, b) => view.direction * inventoryOrder.compare(value(a, view.column), value(b, view.column)));
+}
 function renderTargets() {
   const search = $('targetSearch').value.toLowerCase();
-  const { available, failing } = groupTargetsBySic(targets, sic, search);
+  const grouped = groupTargetsBySic(targets, sic, search);
+  const fullInventory = groupTargetsBySic(targets, sic);
   const eligible = new Set(communicatingTargetIds(targets, sic));
   let removed = false;
   for (const id of selected) if (!eligible.has(id)) { selected.delete(id); removed = true; }
   if (removed) invalidate();
+  const available = inventoryRows('targetRows', grouped.available, eligible, fullInventory.available);
+  const failing = inventoryRows('failingSicRows', grouped.failing, eligible, fullInventory.failing);
   $('targetRows').replaceChildren();
   $('failingSicRows').replaceChildren();
   for (const t of [...available, ...failing]) {
@@ -69,8 +172,15 @@ function renderTargets() {
     input.addEventListener('change', () => {
       input.checked ? selected.add(t.id) : selected.delete(t.id);
       tr.classList.toggle('is-selected', input.checked);
-      $('inventoryStatus').textContent = `${targets.length} discovered · ${selected.size} selected`;
+      const hiddenSelected = selected.size - available.filter(target => selected.has(target.id)).length;
+      $('inventoryStatus').textContent = `${targets.length} discovered · ${available.length + failing.length} shown · ${selected.size} selected${hiddenSelected ? ` (${hiddenSelected} hidden by filters)` : ''}`;
       invalidate();
+      const view = inventoryViews.get('targetRows');
+      if (view.column === 0 || view.filters[0].excluded.size) {
+        renderTargets();
+        const replacement = [...$('targetRows').querySelectorAll('input[type=checkbox]')].find(box => box.getAttribute('aria-label') === input.getAttribute('aria-label'));
+        (replacement || view.filters[0].button).focus();
+      }
     });
     if (eligible.has(t.id) || !failing.includes(t)) td.append(input); else td.textContent = 'Excluded';
     tr.append(td);
@@ -85,19 +195,23 @@ function renderTargets() {
     badge.className = `sic-badge${state?.communicating ? ' good' : state && !['Testing…', 'Not tested'].includes(state.status) ? ' bad' : ''}`;
     badge.textContent = state?.status || 'Not tested';
     if (state?.message) badge.title = state.message;
-    cell.append(badge); tr.append(cell); (failing.includes(t) ? $('failingSicRows') : $('targetRows')).append(tr);
+    cell.append(badge); tr.append(cell);
+    const hashing = document.createElement('td');
+    hashing.textContent = state?.hashMethod || (state?.communicating ? 'Unavailable' : '—');
+    tr.append(hashing); (failing.includes(t) ? $('failingSicRows') : $('targetRows')).append(tr);
   }
   if (!available.length) {
-    const tr = document.createElement('tr'), cell = document.createElement('td'); cell.colSpan = 5; cell.className = 'table-empty';
+    const tr = document.createElement('tr'), cell = document.createElement('td'); cell.colSpan = 6; cell.className = 'table-empty';
     cell.textContent = targets.length ? 'No available targets match. Devices failing SIC are listed below.' : running ? 'Loading managed targets…' : 'No inventory loaded. Refresh inventory to discover managed targets.';
     tr.append(cell); $('targetRows').append(tr);
   }
-  const failingCount = groupTargetsBySic(targets, sic).failing.length;
+  const failingCount = fullInventory.failing.length;
   $('failingSicBox').classList.toggle('hidden', failingCount === 0);
   $('failingSicCount').textContent = `${failingCount} device${failingCount === 1 ? '' : 's'}`;
-  if (failingCount && !failing.length) { const row = document.createElement('tr'), cell = document.createElement('td'); cell.colSpan = 5; cell.className = 'table-empty'; cell.textContent = 'No failing devices match your filter.'; row.append(cell); $('failingSicRows').append(row); }
+  if (failingCount && !failing.length) { const row = document.createElement('tr'), cell = document.createElement('td'); cell.colSpan = 6; cell.className = 'table-empty'; cell.textContent = 'No failing devices match your filter.'; row.append(cell); $('failingSicRows').append(row); }
   $('navTargets').textContent = String(targets.length);
-  $('inventoryStatus').textContent = `${targets.length} discovered · ${selected.size} selected`;
+  const hiddenSelected = selected.size - available.filter(t => selected.has(t.id)).length;
+  $('inventoryStatus').textContent = `${targets.length} discovered · ${available.length + failing.length} shown · ${selected.size} selected${hiddenSelected ? ` (${hiddenSelected} hidden by filters)` : ''}`;
   const tested = [...sic.values()].filter(state => state.status !== 'Testing…');
   $('sicSummary').textContent = tested.length ? `${tested.filter(state => state.communicating).length} / ${targets.length} SIC communicating` : 'SIC not tested';
 }
@@ -108,7 +222,11 @@ function validatePasswordMatch(force = false) {
   $('confirmPassword').setAttribute('aria-invalid', String(show));
   return !mismatch;
 }
-function clearSecrets() {for(const id of ['newPassword','confirmPassword','resetHash'])$(id).value='';$('hashStatus').textContent='Password and hash cleared.';validatePasswordMatch();invalidate();}
+function showHashPasswordError(message = '') {
+  $('hashPasswordError').textContent = message;
+  $('newPassword').setAttribute('aria-invalid', String(Boolean(message)));
+}
+function clearSecrets() {showHashPasswordError();for(const id of ['newPassword','confirmPassword','resetHash'])$(id).value='';$('hashStatus').textContent='Password and hash cleared.';validatePasswordMatch();invalidate();}
 const form=$('loginForm');
 function loginFields() {
   const mds=form.managementType.value==='mds', key=form.authMode.value==='api-key';
@@ -156,9 +274,10 @@ $('selectAll').addEventListener('click',()=>{selected=new Set(communicatingTarge
 $('selectNone').addEventListener('click',()=>{selected.clear();renderTargets();invalidate();});$('targetSearch').addEventListener('input',renderTargets);
 $('sicButton').addEventListener('click',async()=>{if(!selected.size)return status('Select targets first.');busy(true);status('Testing SIC on selected targets…');try{const data=await api('sic-test',{targets:[...selected]});data.rows.forEach(r=>sic.set(r.id,r));status(`${data.rows.filter(r=>r.communicating).length} of ${data.rows.length} targets communicating.`);}catch(e){status(e.message);}finally{busy(false);}});
 $('hashMode').addEventListener('change',()=>{const existing=$('hashMode').value==='existing';clearSecrets();document.querySelectorAll('.generate-field').forEach(e=>e.classList.toggle('hidden',existing));$('resetHash').readOnly=!existing;});
-$('hashForm').addEventListener('submit',async e=>{e.preventDefault();if(running)return;if($('passwordType').value==='recovery'){showPanel('reviewPanel',true);return;}if(!validatePasswordMatch(true)){$('hashStatus').textContent='Passwords do not match. Correct the highlighted confirmation field.';$('confirmPassword').focus();return;}const b=e.submitter;b.disabled=true;$('resetHash').value='';invalidate();try{const data=await api('password-hash',{password:$('newPassword').value});$('resetHash').value=data.hash;$('newPassword').value='';$('confirmPassword').value='';$('hashStatus').textContent='SHA-512 crypt hash generated with a fresh random salt and 5,000 rounds.';}catch(e){$('hashStatus').textContent=e.message;}finally{b.disabled=false;review();}});
-$('passwordType').addEventListener('change',()=>{const expert=$('passwordType').value==='expert', recovery=$('passwordType').value==='recovery';$('resetUsernameField').classList.toggle('hidden',expert);$('resetUsername').required=!expert;clearSecrets();for(const id of ['hashSourceField','hashValueField','generateButtonField'])$(id).classList.toggle('hidden',recovery);$('recoveryNotice').classList.toggle('hidden',!recovery);document.querySelectorAll('.generate-field').forEach(e=>e.classList.toggle('hidden',!recovery && $('hashMode').value==='existing'));$('generateButtonField').classList.toggle('hidden',recovery || $('hashMode').value==='existing');$('hashStatus').textContent=recovery?'Enter and confirm a recovery password, then review the change.':'No hash generated.';});
-$('clearSecrets').addEventListener('click',clearSecrets);$('newPassword').addEventListener('input',()=>{ $('resetHash').value='';validatePasswordMatch();invalidate(); });$('confirmPassword').addEventListener('input',()=>{ $('resetHash').value='';validatePasswordMatch();invalidate(); });$('resetUsername').addEventListener('input',invalidate);$('resetHash').addEventListener('input',invalidate);$('confirmation').addEventListener('input',review);
+$('hashForm').addEventListener('submit',async e=>{e.preventDefault();if(running)return;if($('passwordType').value==='recovery'){showPanel('reviewPanel',true);return;}const characterError = disallowedHashPasswordMessage($('newPassword').value);showHashPasswordError(characterError);if(characterError){$('hashStatus').textContent='No hash generated.';$('newPassword').focus();return;}if(!validatePasswordMatch(true)){$('hashStatus').textContent='Passwords do not match. Correct the highlighted confirmation field.';$('confirmPassword').focus();return;}const b=e.submitter;b.disabled=true;$('resetHash').value='';invalidate();try{const method=$('hashMethod').value, password=$('newPassword').value;const data=await api('password-hash',{password,method});if ($('hashMethod').value!==method || $('newPassword').value!==password || $('confirmPassword').value!==password || $('hashMode').value!=='generate' || $('passwordType').value==='recovery') return;$('resetHash').value=data.hash;$('newPassword').value='';$('confirmPassword').value='';$('hashStatus').textContent=`${hashMethodNames[method]} crypt hash generated with a fresh random salt.`;}catch(e){$('hashStatus').textContent=e.message;}finally{b.disabled=false;review();}});
+$('passwordType').addEventListener('change',()=>{const expert=$('passwordType').value==='expert', recovery=$('passwordType').value==='recovery';$('resetUsernameField').classList.toggle('hidden',expert);$('resetUsername').required=!expert;clearSecrets();for(const id of ['hashSourceField','hashValueField','generateButtonField'])$(id).classList.toggle('hidden',recovery);$('recoveryNotice').classList.toggle('hidden',!recovery);document.querySelectorAll('.generate-field').forEach(e=>e.classList.toggle('hidden',!recovery && $('hashMode').value==='existing'));$('hashMethodField').classList.toggle('hidden',recovery || $('hashMode').value==='existing');$('generateButtonField').classList.toggle('hidden',recovery || $('hashMode').value==='existing');$('hashStatus').textContent=recovery?'Enter and confirm a recovery password, then review the change.':'No hash generated.';});
+$('hashMethod').addEventListener('change',()=>{ $('resetHash').value=''; $('hashStatus').textContent='No hash generated.'; invalidate(); });
+$('clearSecrets').addEventListener('click',clearSecrets);$('newPassword').addEventListener('input',()=>{ if ($('hashPasswordError').textContent) showHashPasswordError(disallowedHashPasswordMessage($('newPassword').value)); $('resetHash').value='';validatePasswordMatch();invalidate(); });$('confirmPassword').addEventListener('input',()=>{ $('resetHash').value='';validatePasswordMatch();invalidate(); });$('resetUsername').addEventListener('input',invalidate);$('resetHash').addEventListener('input',invalidate);$('confirmation').addEventListener('input',review);
 function renderJob() {
   const {done: finished, succeeded} = renderExecutionResults(job, $('resultRows'));
   $('navResults').textContent=String(job.rows.length);
