@@ -162,10 +162,13 @@ After login, the app automatically:
 2. Expands standard cluster objects into individual members.
 3. Tests SIC on every discovered target.
 4. Runs a read-only platform check on each target with communicating SIC.
+5. Reads the configured password hashing method using Clish (gClish for detected Security Groups). The **Hashing** column shows the configured method for new passwords, not the hash of an existing account. A failed lookup shows **Unavailable** without changing reset eligibility.
 
 **SIC validation is mandatory.** Only targets that report **Communicating** and pass platform checks can be selected. Devices failing SIC appear in a separate **Failing SIC** box. Targets with an unverified platform or incomplete Security Group availability remain blocked.
 
 No targets are selected automatically. Choose individual targets or **Select All**, which selects only eligible targets across the inventory, including those hidden by the search filter. Targets are sorted by name.
+
+Click a column heading to sort. Open its **All values** menu to check or uncheck values found in that table. Column filters combine with the inventory search. Filtering hides rows without clearing selected targets; the inventory count shows any hidden selections.
 
 **Refresh Inventory & SIC** repeats discovery, SIC testing, and platform detection, and clears the selection. **Test SIC** reruns SIC and platform checks for currently selected targets; it is an additional refresh, not a replacement for the automatic checks. A selected device that no longer qualifies is removed from selection.
 
@@ -177,13 +180,17 @@ Under **Password to change**, choose:
 - **Recover Gaia user access (password)** — set a new plaintext password for an existing Gaia user if a hash change leaves you unable to log in. Follow the recovery instructions below.
 - **Expert mode password** — changes the system-wide Expert credential on each selected target. No username is required. Gaia user login passwords and GRUB credentials are not changed.
 
-For either hash-based option, generate a hash from matching password fields, or paste a raw SHA-512 crypt hash. Recovery uses the password fields directly and does not generate a hash. Switching password type clears the prepared password/hash and confirmation.
+For either hash-based option, generate a hash from matching password fields, or paste a raw SHA-512, SHA-256, or MD5 crypt hash. Recovery uses the password fields directly and does not generate a hash. Switching password type clears the prepared password/hash and confirmation.
 
-The generator creates a new random 16-character salt and uses 5,000 rounds. Accepted hashes have this format:
+Choose **Hash Method** before generating. SHA-512 is the default. Use MD5 only for legacy compatibility where the target release supports it.
 
-```text
-$6$<16-character salt>$<86-character digest>
-```
+| Method | Prefix | Generated salt | Digest |
+| --- | --- | --- | --- |
+| SHA-512 | `$6$` | 16 characters | 86 characters |
+| SHA-256 | `$5$` | 16 characters | 43 characters |
+| MD5 crypt | `$1$` | 8 characters | 22 characters |
+
+OpenSSL must support the corresponding `passwd` option: `-6`, `-5`, or `-1`. The Hashing inventory column reports the target's configured default; it does not change the selected method or guarantee that a target accepts a given hash.
 
 Paste the raw hash **without backslash escaping**. The app escapes dollar signs when building the shell command.
 
@@ -221,6 +228,8 @@ Results show the account scope, timing, counts, and individual target outcomes. 
 | Failed | Execution failed or returned an error. Inspect diagnostics; the password may have changed before a later failure. |
 | Skipped | A required preflight check failed, so the password command was not submitted for that target. |
 | Unknown | Completion or post-change verification could not be established. The command may still be running or may already have changed the password. Check the device before retrying. |
+
+For standard Gaia user hash resets, the gateway compares the saved hash with the submitted hash and returns only a verification verdict. A mismatch, missing user, or unavailable check appears separately from the save result. This does not verify login access. Stored-hash verification does not run for Maestro, Expert mode, or plaintext recovery.
 
 There is no automatic rollback. Unrelated failures and tasks with unknown completion are not automatically retried.
 
